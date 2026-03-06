@@ -1,0 +1,35 @@
+[02-Jul-2021 12:07:47 Asia/Jakarta] PHP Parse error:  syntax error, unexpected '<' in /home/klikdsic/public_html/log/01_create_log.php on line 260
+[02-Jul-2021 12:47:03 Asia/Jakarta] PHP Parse error:  syntax error, unexpected 'form' (T_STRING), expecting ',' or ';' in /home/klikdsic/public_html/log/01_create_log.php on line 260
+[02-Jul-2021 13:18:23 Asia/Jakarta] PHP Parse error:  syntax error, unexpected '$deslayanan' (T_VARIABLE), expecting '(' in /home/klikdsic/public_html/log/01_create_log.php on line 27
+[19-Jul-2022 10:21:49 UTC] PHP Warning:  include(15_lap_invoice_cus.php): failed to open stream: No such file or directory in /home/klikdsic/public_html/log/index.php on line 135
+[19-Jul-2022 10:21:49 UTC] PHP Warning:  include(15_lap_invoice_cus.php): failed to open stream: No such file or directory in /home/klikdsic/public_html/log/index.php on line 135
+[19-Jul-2022 10:21:49 UTC] PHP Warning:  include(): Failed opening '15_lap_invoice_cus.php' for inclusion (include_path='.:/opt/cpanel/ea-php70/root/usr/share/pear') in /home/klikdsic/public_html/log/index.php on line 135
+[31-Aug-2022 13:19:16 UTC] PHP Fatal error:  Uncaught Error: Call to undefined function UPPER() in /home/klikdsic/public_html/log/10_payment_invoice.php:40
+Stack trace:
+#0 /home/klikdsic/public_html/log/index.php(129): include()
+#1 {main}
+  thrown in /home/klikdsic/public_html/log/10_payment_invoice.php on line 40
+[31-Aug-2022 13:20:42 UTC] PHP Fatal error:  Uncaught Error: Call to undefined function UPPER() in /home/klikdsic/public_html/log/10_payment_invoice.php:7
+Stack trace:
+#0 /home/klikdsic/public_html/log/index.php(129): include()
+#1 {main}
+  thrown in /home/klikdsic/public_html/log/10_payment_invoice.php on line 7
+[31-Aug-2022 13:20:57 UTC] PHP Fatal error:  Uncaught Error: Call to undefined function UPPER() in /home/klikdsic/public_html/log/10_payment_invoice.php:7
+Stack trace:
+#0 /home/klikdsic/public_html/log/index.php(129): include()
+#1 {main}
+  thrown in /home/klikdsic/public_html/log/10_payment_invoice.php on line 7
+[31-Aug-2022 13:21:00 UTC] PHP Fatal error:  Uncaught Error: Call to undefined function UPPER() in /home/klikdsic/public_html/log/10_payment_invoice.php:7
+Stack trace:
+#0 /home/klikdsic/public_html/log/index.php(129): include()
+#1 {main}
+  thrown in /home/klikdsic/public_html/log/10_payment_invoice.php on line 7
+[31-Aug-2022 13:21:14 UTC] PHP Fatal error:  Uncaught Error: Call to undefined function UPPER() in /home/klikdsic/public_html/log/10_payment_invoice.php:7
+Stack trace:
+#0 /home/klikdsic/public_html/log/index.php(129): include()
+#1 {main}
+  thrown in /home/klikdsic/public_html/log/10_payment_invoice.php on line 7
+[14-Nov-2022 09:12:00 UTC] PHP Warning:  Cannot modify header information - headers already sent by (output started at /home/klikdsic/public_html/log/index.php:32) in /home/klikdsic/public_html/log/ubahpwd.php on line 11
+[14-Nov-2022 09:20:07 UTC] PHP Warning:  Cannot modify header information - headers already sent by (output started at /home/klikdsic/public_html/log/index.php:32) in /home/klikdsic/public_html/log/ubahpwd.php on line 11
+[21-Nov-2022 09:30:20 UTC] PHP Warning:  Cannot modify header information - headers already sent by (output started at /home/klikdsic/public_html/log/index.php:32) in /home/klikdsic/public_html/log/ubahpwd.php on line 11
+[21-Nov-2022 09:31:34 UTC] PHP Warning:  Cannot modify header information - headers already sent by (output started at /home/klikdsic/public_html/log/index.php:32) in /home/klikdsic/public_html/log/ubahpwd.php on line 11
