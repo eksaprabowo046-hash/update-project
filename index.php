@@ -196,7 +196,8 @@ if (isset($_GET['par']) && $_GET['par'] == '53' && (isset($_GET['ajax_plans']) |
                         '26' => 'Perizinan', '27' => 'Perizinan', '28' => 'Perizinan',
                         '31' => 'Implementasi', '33' => 'Implementasi', '34' => 'Implementasi',
                         '35' => 'Lembur', '35a' => 'Lembur', '36' => 'Lembur', '37' => 'Lembur',
-                        '38' => 'Penggajian', '51' => 'Penggajian',
+                        '38' => 'Penggajian', '51' => 'Penggajian', '56' => 'Penggajian',
+
                         '39' => 'Keuangan', '40' => 'Keuangan', '41' => 'Keuangan',
                         '42' => 'About',
                         '43' => 'Dashboard',
@@ -318,6 +319,9 @@ if (isset($_GET['par']) && $_GET['par'] == '53' && (isset($_GET['ajax_plans']) |
                       include "37_lap_lembur.php";
                     } else if ($_GET['par'] == '38') {
                       include "38_penggajian.php";
+                    } else if ($_GET['par'] == '56') {
+                      include "56_thr.php";
+
                     } else if ($_GET['par'] == '39') {
                       include "39_akun.php";
                     } else if ($_GET['par'] == '40a') {

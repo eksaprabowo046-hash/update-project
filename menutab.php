@@ -398,8 +398,10 @@ if (cek_akses('Implementasi', $hak_akses_user)) {
 <div class="has-submenu">
   <a href="#">Penggajian</a>
   <div class="submenu">
-    <a href='index.php?par=38'>Penggajian</a>
+    <a href='index.php?par=38'>Penggajian Bulanan</a>
+    <a href='index.php?par=56'>Manajemen THR</a>
     <a href='index.php?par=51'>Laporan Penggajian</a>
+
   </div>
 </div>
 <?php } ?>

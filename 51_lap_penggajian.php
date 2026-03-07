@@ -88,7 +88,7 @@ if (isset($_GET['export']) && $_GET['export'] == 'excel') {
     echo '<th rowspan="2">NAMA</th>';
     echo '<th rowspan="2">BANK</th>';
     echo '<th rowspan="2">PERIODE</th>';
-    echo '<th colspan="5">GAJI</th>';
+    echo '<th colspan="6">GAJI</th>';
     echo '<th rowspan="2">GAJI KOTOR</th>';
     echo '<th colspan="4">POTONGAN</th>';
     echo '<th rowspan="2">JML POT</th>';
@@ -104,6 +104,7 @@ if (isset($_GET['export']) && $_GET['export'] == 'excel') {
     echo '<th>T. PERI DNS</th>';
     echo '<th>LEMBUR</th>';
     echo '<th>BONUS</th>';
+
     echo '<th>BPJS KES</th>';
     echo '<th>BPJS TK</th>';
     echo '<th>PINJAMAN</th>';
@@ -112,12 +113,14 @@ if (isset($_GET['export']) && $_GET['export'] == 'excel') {
 
     $no = 1;
     $totPokok = 0; $totTunJab = 0; $totTunPerj = 0; $totLembur = 0; $totBonus = 0;
+
     $totGajiKotor = 0;
     $totBpjsKes = 0; $totBpjsTk = 0; $totPotPinjaman = 0; $totPotLain = 0;
     $totJmlPot = 0; $totDiterima = 0;
 
     while ($row = $sql->fetch(PDO::FETCH_ASSOC)) {
         $gaji_kotor = floatval($row['gaji_pokok']) + floatval($row['tunj_jabatan']) + floatval($row['tunj_perjalanan']) + floatval($row['lembur']) + floatval($row['bonus']);
+
         $jml_pot    = floatval($row['bpjs_kesehatan']) + floatval($row['bpjs_tk']) + floatval($row['pot_pinjaman']) + floatval($row['pot_lain']);
         $diterima   = $gaji_kotor - $jml_pot;
 
@@ -126,6 +129,7 @@ if (isset($_GET['export']) && $_GET['export'] == 'excel') {
         $totTunPerj += floatval($row['tunj_perjalanan']);
         $totLembur += floatval($row['lembur']);
         $totBonus += floatval($row['bonus']);
+
         $totGajiKotor += $gaji_kotor;
         $totBpjsKes += floatval($row['bpjs_kesehatan']);
         $totBpjsTk += floatval($row['bpjs_tk']);
@@ -188,6 +192,7 @@ if (isset($_GET['export']) && $_GET['export'] == 'excel') {
         echo '<td style="text-align:right;">' . number_format($row['tunj_perjalanan'], 0, ',', '.') . '</td>';
         echo '<td style="text-align:right;">' . number_format($row['lembur'], 0, ',', '.') . '</td>';
         echo '<td style="text-align:right;">' . number_format($row['bonus'], 0, ',', '.') . '</td>';
+
         echo '<td style="text-align:right; font-weight:bold;">' . number_format($gaji_kotor, 0, ',', '.') . '</td>';
         echo '<td style="text-align:right;">' . number_format($row['bpjs_kesehatan'], 0, ',', '.') . '</td>';
         echo '<td style="text-align:right;">' . number_format($row['bpjs_tk'], 0, ',', '.') . '</td>';
@@ -210,6 +215,7 @@ if (isset($_GET['export']) && $_GET['export'] == 'excel') {
         echo '<td style="text-align:right;">' . number_format($totTunPerj, 0, ',', '.') . '</td>';
         echo '<td style="text-align:right;">' . number_format($totLembur, 0, ',', '.') . '</td>';
         echo '<td style="text-align:right;">' . number_format($totBonus, 0, ',', '.') . '</td>';
+
         echo '<td style="text-align:right;">' . number_format($totGajiKotor, 0, ',', '.') . '</td>';
         echo '<td style="text-align:right;">' . number_format($totBpjsKes, 0, ',', '.') . '</td>';
         echo '<td style="text-align:right;">' . number_format($totBpjsTk, 0, ',', '.') . '</td>';
@@ -434,7 +440,7 @@ $bulanArr = [
                             <th rowspan="2">NAMA</th>
                             <th rowspan="2">BANK</th>
                             <th rowspan="2">PERIODE</th>
-                            <th colspan="5">GAJI</th>
+                            <th colspan="6">GAJI</th>
                             <th rowspan="2">GAJI KOTOR</th>
                             <th colspan="4">POTONGAN</th>
                             <th rowspan="2">JML POT</th>
@@ -450,6 +456,7 @@ $bulanArr = [
                             <th>T. PERI DNS</th>
                             <th>LEMBUR</th>
                             <th>BONUS</th>
+
                             <!-- POTONGAN sub-columns -->
                             <th>BPJS KES</th>
                             <th>BPJS TK</th>
@@ -490,12 +497,14 @@ $bulanArr = [
 
                         $no = 1;
                         $totPokok = 0; $totTunJab = 0; $totTunPerj = 0; $totLembur = 0; $totBonus = 0;
+
                         $totGajiKotor = 0;
                         $totBpjsKes = 0; $totBpjsTk = 0; $totPotPinjaman = 0; $totPotLain = 0;
                         $totJmlPot = 0; $totDiterima = 0;
 
                         while ($row = $sql->fetch(PDO::FETCH_ASSOC)) {
                             $gaji_kotor = floatval($row['gaji_pokok']) + floatval($row['tunj_jabatan']) + floatval($row['tunj_perjalanan']) + floatval($row['lembur']) + floatval($row['bonus']);
+
                             $jml_pot    = floatval($row['bpjs_kesehatan']) + floatval($row['bpjs_tk']) + floatval($row['pot_pinjaman']) + floatval($row['pot_lain']);
                             $diterima   = $gaji_kotor - $jml_pot;
 
@@ -505,6 +514,7 @@ $bulanArr = [
                             $totTunPerj += floatval($row['tunj_perjalanan']);
                             $totLembur += floatval($row['lembur']);
                             $totBonus += floatval($row['bonus']);
+
                             $totGajiKotor += $gaji_kotor;
                             $totBpjsKes += floatval($row['bpjs_kesehatan']);
                             $totBpjsTk += floatval($row['bpjs_tk']);
@@ -588,6 +598,7 @@ $bulanArr = [
 
                             echo '<td class="money">' . $lembur_link . '</td>';
                             echo '<td class="money">' . number_format($row['bonus'], 0, ',', '.') . '</td>';
+
                             echo '<td class="money" style="font-weight:bold;">' . number_format($gaji_kotor, 0, ',', '.') . '</td>';
                             echo '<td class="money">' . number_format($row['bpjs_kesehatan'], 0, ',', '.') . '</td>';
                             echo '<td class="money">' . number_format($row['bpjs_tk'], 0, ',', '.') . '</td>';
@@ -611,6 +622,7 @@ $bulanArr = [
                             echo '<td class="money" style="font-weight:bold; font-size:14px !important; color:#000;">' . number_format($totTunPerj, 0, ',', '.') . '</td>';
                             echo '<td class="money" style="font-weight:bold; font-size:14px !important; color:#000;">' . number_format($totLembur, 0, ',', '.') . '</td>';
                             echo '<td class="money" style="font-weight:bold; font-size:14px !important; color:#000;">' . number_format($totBonus, 0, ',', '.') . '</td>';
+
                             echo '<td class="money" style="font-weight:bold; font-size:14px !important; color:#000;">' . number_format($totGajiKotor, 0, ',', '.') . '</td>';
                             echo '<td class="money" style="font-weight:bold; font-size:14px !important; color:#000;">' . number_format($totBpjsKes, 0, ',', '.') . '</td>';
                             echo '<td class="money" style="font-weight:bold; font-size:14px !important; color:#000;">' . number_format($totBpjsTk, 0, ',', '.') . '</td>';
@@ -800,11 +812,11 @@ function exportExcel() {
         }
     };
     
-    // Numeric columns (POKOK to DITERIMA) = index 5 to 16
-    var numericCols = [5,6,7,8,9,10,11,12,13,14,15,16];
+    // Numeric columns (POKOK to DITERIMA) = index 5 to 17
+    var numericCols = [5,6,7,8,9,10,11,12,13,14,15,16,17];
     
-    // Force range to cover all 19 columns (NO through KETERANGAN)
-    if (range.e.c < 18) range.e.c = 18;
+    // Force range to cover all 20 columns (NO through KETERANGAN)
+    if (range.e.c < 19) range.e.c = 19;
     ws['!ref'] = XLSX.utils.encode_range(range);
     
     // Apply styles - force create ALL cells with borders
@@ -847,7 +859,7 @@ function exportExcel() {
     // Column widths
     ws['!cols'] = [
         {wch: 4}, {wch: 18}, {wch: 20}, {wch: 20}, {wch: 10},
-        {wch: 14}, {wch: 12}, {wch: 12}, {wch: 12}, {wch: 10},
+        {wch: 14}, {wch: 12}, {wch: 12}, {wch: 12}, {wch: 10}, {wch: 10},
         {wch: 14}, {wch: 12}, {wch: 12}, {wch: 12}, {wch: 12},
         {wch: 12}, {wch: 20}, {wch: 30}, {wch: 20}
     ];

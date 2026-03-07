@@ -40,57 +40,7 @@ function get_pot_pinjaman_auto($conn, $iduser, $periode = null) {
 
 // AJAX Handler: Ambil data gaji berdasarkan ID
 if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_gaji_data') {
-    if (!isset($_SESSION['DEFAULT_IDUSER']) || empty($_SESSION['DEFAULT_IDUSER'])) {
-        die(json_encode(['error' => 'Session tidak valid']));
-    }
-    
-    $id = isset($_GET['id']) ? trim($_GET['id']) : '';
-    
-    if (empty($id)) {
-        die(json_encode(['error' => 'ID tidak valid']));
-    }
-    
-    try {
-        $q = $conn->prepare("
-            SELECT g.*, ru.nama AS nama_pegawai
-            FROM tgaji g
-            LEFT JOIN ruser ru ON g.iduser_pegawai = ru.iduser
-            WHERE g.id = :id
-        ");
-        $q->bindParam(':id', $id);
-        $q->execute();
-        
-        $data = $q->fetch(PDO::FETCH_ASSOC);
-        
-        if ($data) {
-            // Query total cicilan pinjaman aktif pegawai ini
-            $data['cicilan_pinjaman_aktif'] = get_pot_pinjaman_auto($conn, $data['iduser_pegawai'], $data['periode']);
-            
-            // Query jumlah lembur approved untuk pegawai ini pada periode yang sama
-            $qlembur = $conn->prepare("
-                SELECT COUNT(*) AS jumlah_lembur
-                FROM tdtllembur dl
-                JOIN tlembur l ON dl.idlembur = l.id
-                WHERE dl.iduser_pegawai = :iduser 
-                  AND l.status_approval = 'Approved'
-                  AND DATE_FORMAT(l.tgl_lembur, '%Y-%m') = :periode
-            ");
-            $qlembur->execute([':iduser' => $data['iduser_pegawai'], ':periode' => $data['periode']]);
-            $rlembur = $qlembur->fetch(PDO::FETCH_ASSOC);
-            $data['jumlah_lembur'] = intval($rlembur['jumlah_lembur']);
-            $data['lembur_auto'] = $data['jumlah_lembur'] * 90000;
-            
-            header('Content-Type: application/json');
-            echo json_encode($data);
-        } else {
-            echo json_encode(['error' => 'Data tidak ditemukan']);
-        }
-        
-    } catch (Exception $e) {
-        echo json_encode(['error' => $e->getMessage()]);
-    }
-    exit;
-}
+
 
 $pesan = "";
 $tglini = date('Y-m-d');
@@ -110,6 +60,9 @@ try {
         $conn->exec("ALTER TABLE tgaji ADD COLUMN sync_pinjaman TINYINT(1) DEFAULT 0 AFTER pot_lain");
     }
 } catch (Exception $e) {}
+
+// No THR column auto-migration in regular payroll
+
 
 try {
     $cek = $conn->query("SHOW COLUMNS FROM tgaji LIKE 'keterangan'");
@@ -151,6 +104,7 @@ if (isset($_POST['add_pegawai'])) {
     $gaji_pokok = str_replace('.', '', $_POST['gaji_pokok'] ?? '0');
     $tunj_jabatan = str_replace('.', '', $_POST['tunj_jabatan'] ?? '0');
     $tunj_perjalanan = str_replace('.', '', $_POST['tunj_perjalanan'] ?? '0');
+
     
     if (!$idpegawai || !$periode) {
         $pesan = "Pegawai dan periode wajib diisi!";
@@ -181,17 +135,20 @@ if (isset($_POST['add_pegawai'])) {
                 $lembur_auto = $jumlah_lembur * 90000;
                 
                 // Hitung total terima (pendapatan - potongan pinjaman)
+                // Hitung total terima (pendapatan - potongan pinjaman)
                 $total_pendapatan = $gaji_pokok + $tunj_jabatan + $tunj_perjalanan + $lembur_auto;
                 $total_terima = $total_pendapatan - $pot_pinjaman_auto;
+
                 
                 $stmt = $conn->prepare("
                     INSERT INTO tgaji
-                    (iduser_pegawai, periode, gaji_pokok, tunj_jabatan, tunj_perjalanan, lembur, bonus, 
+                    (iduser_pegawai, periode, gaji_pokok, tunj_jabatan, tunj_perjalanan, lembur, bonus,
                      bpjs_tk, bpjs_kesehatan, pot_pinjaman, pot_lain, total_terima, status_gaji, tgl_input)
                     VALUES
                     (:idpegawai, :periode, :gaji_pokok, :tunj_jabatan, :tunj_perjalanan, :lembur_auto, 0, 
                      0, 0, :pot_pinjaman, 0, :total_terima, 'Draft', NOW())
                 ");
+
                 
                 $stmt->execute([
                     ':idpegawai' => $idpegawai,
@@ -203,6 +160,7 @@ if (isset($_POST['add_pegawai'])) {
                     ':pot_pinjaman' => $pot_pinjaman_auto,
                     ':total_terima' => $total_terima
                 ]);
+
                 
                 $pesanPinjaman = $pot_pinjaman_auto > 0 ? " (Potongan pinjaman otomatis: Rp " . number_format($pot_pinjaman_auto, 0, ',', '.') . ")" : "";
                 $pesanLembur = $lembur_auto > 0 ? " (Lembur otomatis: $jumlah_lembur x Rp 90.000 = Rp " . number_format($lembur_auto, 0, ',', '.') . ")" : "";
@@ -222,6 +180,7 @@ if (isset($_POST['adjust_gaji'])) {
     $tunj_perjalanan = str_replace('.', '', $_POST['tunj_perjalanan'] ?? '0');
     $lembur = str_replace('.', '', $_POST['lembur'] ?? '0');
     $bonus = str_replace('.', '', $_POST['bonus'] ?? '0');
+
     $bpjs_tk = str_replace('.', '', $_POST['bpjs_tk'] ?? '0');
     $bpjs_kesehatan = str_replace('.', '', $_POST['bpjs_kesehatan'] ?? '0');
     $pot_pinjaman = str_replace('.', '', $_POST['pot_pinjaman'] ?? '0');
@@ -234,6 +193,7 @@ if (isset($_POST['adjust_gaji'])) {
         try {
             // Hitung total pendapatan
             $total_pendapatan = $gaji_pokok + $tunj_jabatan + $tunj_perjalanan + $lembur + $bonus;
+
             
             // Hitung total potongan
             $total_potongan = $bpjs_tk + $bpjs_kesehatan + $pot_pinjaman + $pot_lain;
@@ -286,6 +246,7 @@ if (isset($_POST['adjust_gaji'])) {
                     tunj_perjalanan = :tunj_perjalanan,
                     lembur = :lembur,
                     bonus = :bonus,
+
                     bpjs_tk = :bpjs_tk,
                     bpjs_kesehatan = :bpjs_kesehatan,
                     pot_pinjaman = :pot_pinjaman,
@@ -303,6 +264,7 @@ if (isset($_POST['adjust_gaji'])) {
                 ':tunj_perjalanan' => $tunj_perjalanan,
                 ':lembur' => $lembur,
                 ':bonus' => $bonus,
+
                 ':bpjs_tk' => $bpjs_tk,
                 ':bpjs_kesehatan' => $bpjs_kesehatan,
                 ':pot_pinjaman' => $pot_pinjaman,
@@ -374,17 +336,18 @@ if (isset($_POST['generate_gaji'])) {
                 
                 // Hitung total
                 $total_pendapatan = floatval($ref['gaji_pokok']) + floatval($ref['tunj_jabatan']) 
-                                  + floatval($ref['tunj_perjalanan']) + $lembur_auto;
+                                  + floatval($ref['tunj_perjalanan']) + $lembur_auto; 
+                // THR tidak digenerate otomatis ke periode baru, manual adjust.
                 $total_potongan = floatval($ref['bpjs_tk']) + floatval($ref['bpjs_kesehatan']) + $pot_pinjaman;
                 $total_terima = $total_pendapatan - $total_potongan;
                 
                 // Insert data gaji baru
                 $stmtIns = $conn->prepare("
                     INSERT INTO tgaji
-                    (iduser_pegawai, periode, gaji_pokok, tunj_jabatan, tunj_perjalanan, lembur, bonus, 
+                    (iduser_pegawai, periode, gaji_pokok, tunj_jabatan, tunj_perjalanan, lembur, bonus, thr,
                      bpjs_tk, bpjs_kesehatan, pot_pinjaman, pot_lain, total_terima, status_gaji, tgl_input, tgl_generate)
                     VALUES
-                    (:idpegawai, :periode, :gaji_pokok, :tunj_jabatan, :tunj_perjalanan, :lembur, 0, 
+                    (:idpegawai, :periode, :gaji_pokok, :tunj_jabatan, :tunj_perjalanan, :lembur, 0, 0,
                      :bpjs_tk, :bpjs_kesehatan, :pot_pinjaman, 0, :total_terima, 'Generated', NOW(), NOW())
                 ");
                 
@@ -418,7 +381,7 @@ if (isset($_POST['generate_gaji'])) {
             // CATATAN: record dengan sync_pinjaman = 1 sudah terkunci — tidak boleh diubah pot_pinjaman-nya
             $qExisting = $conn->prepare("
                 SELECT g.id, g.iduser_pegawai, g.gaji_pokok, g.tunj_jabatan, g.tunj_perjalanan,
-                       g.bonus, g.bpjs_tk, g.bpjs_kesehatan, g.pot_lain, g.sync_pinjaman
+                       g.bonus, g.thr, g.bpjs_tk, g.bpjs_kesehatan, g.pot_lain, g.sync_pinjaman
                 FROM tgaji g
                 WHERE g.periode = :periode
             ");
@@ -453,6 +416,7 @@ if (isset($_POST['generate_gaji'])) {
 
                     $total_pend_locked = floatval($ex['gaji_pokok']) + floatval($ex['tunj_jabatan'])
                                        + floatval($ex['tunj_perjalanan']) + $lembur_locked + floatval($ex['bonus']);
+
                     $total_pot_locked  = floatval($ex['bpjs_tk']) + floatval($ex['bpjs_kesehatan'])
                                        + $curPot + floatval($ex['pot_lain']);
                     $total_terima_locked = $total_pend_locked - $total_pot_locked;
@@ -486,6 +450,7 @@ if (isset($_POST['generate_gaji'])) {
                 // Hitung total terima baru
                 $total_pendapatan_new = floatval($ex['gaji_pokok']) + floatval($ex['tunj_jabatan']) 
                                       + floatval($ex['tunj_perjalanan']) + $lembur_new + floatval($ex['bonus']);
+
                 $total_potongan_new = floatval($ex['bpjs_tk']) + floatval($ex['bpjs_kesehatan']) 
                                     + $pot_pinjaman_new + floatval($ex['pot_lain']);
                 $total_terima_new = $total_pendapatan_new - $total_potongan_new;
@@ -853,6 +818,10 @@ if (isset($_POST['periode_generate']) && !empty($_POST['periode_generate'])) {
                     $('#adjust_tunj_perjalanan').val(formatRibuan(parseInt(data.tunj_perjalanan) || 0));
                     $('#adjust_lembur').val(formatRibuan(parseInt(data.lembur) || 0));
                     $('#adjust_bonus').val(formatRibuan(parseInt(data.bonus) || 0));
+
+                    
+                    window._currentIdPegawai = data.iduser_pegawai;
+                    
                     $('#adjust_bpjs_tk').val(formatRibuan(parseInt(data.bpjs_tk) || 0));
                     $('#adjust_bpjs_kesehatan').val(formatRibuan(parseInt(data.bpjs_kesehatan) || 0));
                     $('#adjust_pot_pinjaman').val(formatRibuan(parseInt(data.pot_pinjaman) || 0));
@@ -1033,6 +1002,7 @@ if (isset($_POST['periode_generate']) && !empty($_POST['periode_generate'])) {
                                 <th>Tunj. Perjalanan</th>
                                 <th>Lembur</th>
                                 <th>Bonus</th>
+
                                 <th>BPJS TK</th>
                                 <th>BPJS Kes</th>
                                 <th>Pot. Pinjaman</th>
@@ -1171,17 +1141,21 @@ if (isset($_POST['periode_generate']) && !empty($_POST['periode_generate'])) {
             
             <div class="form-group">
                 <label>Gaji Pokok</label>
-                <input type="text" name="gaji_pokok" class="form-control input-ribuan" placeholder="0">
+                <input type="text" name="gaji_pokok" id="add_gaji_pokok" class="form-control input-ribuan" placeholder="0">
             </div>
             
             <div class="form-group">
                 <label>Tunjangan Jabatan</label>
-                <input type="text" name="tunj_jabatan" class="form-control input-ribuan" placeholder="0">
+                <input type="text" name="tunj_jabatan" id="add_tunj_jabatan" class="form-control input-ribuan" placeholder="0">
             </div>
             
             <div class="form-group">
                 <label>Tunjangan Perjalanan Dinas</label>
-                <input type="text" name="tunj_perjalanan" class="form-control input-ribuan" placeholder="0">
+                <input type="text" name="tunj_perjalanan" id="add_tunj_perjalanan" class="form-control input-ribuan" placeholder="0">
+            </div>
+            
+            <div class="form-group">
+
             </div>
             
             <div class="form-group" style="margin-top: 20px;">
@@ -1245,6 +1219,10 @@ if (isset($_POST['periode_generate']) && !empty($_POST['periode_generate'])) {
                 <div class="form-group">
                     <label>Bonus</label>
                     <input type="text" name="bonus" id="adjust_bonus" class="form-control input-ribuan" value="0" onkeyup="hitungTotal()">
+                </div>
+                
+                <div class="form-group">
+
                 </div>
                 
                 <div style="margin-top: 10px; font-weight: bold; color: green;">
@@ -1429,6 +1407,54 @@ function cetakAllZip(periode) {
         return;
     }
     window.open('38_cetak_slip_gaji_all.php?periode=' + encodeURIComponent(periode), '_blank');
+}
+        error: function() {
+            alert('Gagal mengambil data perhitungan THR');
+        }
+    });
+}
+
+function hitungThrOtomatisAdjust() {
+    // get original iduser
+    var rowData = window._currentRowData || null; // fallback, try to extract id
+    var selectedIdGaji = $('#adjust_id_gaji').val();
+    
+    if(!selectedIdGaji) {
+        alert("Tidak bisa mengambil ID Gaji.");
+        return;
+    }
+    
+    // We need iduser_pegawai. Easiest way is to refetch or store it globally.
+    // In openAdjustModal, we can store global idpegawai.
+    // So let's add `window._currentIdPegawai = data.iduser_pegawai;` to openAdjustModal script
+    var idPegawai = window._currentIdPegawai;
+    var periode = $('#adjust_periode').val();
+    var gp = parseRibuan($('#adjust_gaji_pokok').val());
+    var tj = parseRibuan($('#adjust_tunj_jabatan').val());
+    
+    if (!idPegawai) {
+        alert("ID Pegawai tidak ditemukan untuk perhitungan THR. Silakan tutup dan buka ulang Adjust.");
+        return;
+    }
+    
+    $.ajax({
+        url: '38_penggajian.php',
+        method: 'GET',
+        data: {ajax: 'hitung_thr', idpegawai: idPegawai, periode: periode, gaji_pokok: gp, tunj_jabatan: tj},
+        dataType: 'json',
+        success: function(res) {
+            if (res.error) {
+                alert("Error: " + res.error);
+            } else {
+                $('#adjust_thr').val(formatRibuan(res.thr));
+                hitungTotal();
+                alert("Masa kerja: " + res.masa_kerja_bulan + " bulan.\nDasar perhitungan upah: Rp " + formatRibuan(res.satuan_upah) + ".\nTHR direkomendasikan: Rp " + formatRibuan(res.thr));
+            }
+        },
+        error: function() {
+            alert('Gagal mengambil data perhitungan THR');
+        }
+    });
 }
 </script>
 

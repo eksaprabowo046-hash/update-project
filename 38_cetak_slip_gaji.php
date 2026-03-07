@@ -120,6 +120,7 @@ $lembur_val     = floatval($data['lembur']);
 $bonus_val      = floatval($data['bonus']);
 $gaji_kotor     = $gaji_pokok + $tunj_jabatan + $tunj_perjalanan + $lembur_val + $bonus_val;
 
+
 $bpjs_kes       = floatval($data['bpjs_kesehatan']);
 $bpjs_tk        = floatval($data['bpjs_tk']);
 $pot_pinjaman   = floatval($data['pot_pinjaman']);
@@ -301,6 +302,7 @@ $tglCetak = date('d/m/Y H:i');
             <td class="col-rp">Rp</td>
             <td class="col-amount"><?= rp($bonus_val) ?></td>
         </tr>
+
     </table>
 
     <div class="row-subtotal">

@@ -108,6 +108,7 @@ foreach ($allData as $data) {
     $bonus_val      = floatval($data['bonus']);
     $gaji_kotor     = $gaji_pokok + $tunj_jabatan + $tunj_perjalanan + $lembur_val + $bonus_val;
 
+
     $bpjs_kes       = floatval($data['bpjs_kesehatan']);
     $bpjs_tk        = floatval($data['bpjs_tk']);
     $pot_pinjaman   = floatval($data['pot_pinjaman']);
@@ -127,6 +128,7 @@ foreach ($allData as $data) {
         'tunj_perjalanan' => $tunj_perjalanan,
         'lembur_val' => $lembur_val,
         'bonus_val' => $bonus_val,
+        'thr_val' => $thr_val,
         'gaji_kotor' => $gaji_kotor,
         'bpjs_kes' => $bpjs_kes,
         'bpjs_tk' => $bpjs_tk,
@@ -370,6 +372,9 @@ $totalSlips = count($slips);
             <td class="col-sign">+</td>
             <td class="col-rp">Rp</td>
             <td class="col-amount"><?= rp_all($s['bonus_val']) ?></td>
+        </tr>
+        <tr>
+
         </tr>
     </table>
 
