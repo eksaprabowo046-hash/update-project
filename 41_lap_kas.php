@@ -217,7 +217,7 @@ document.onkeypress = stopRKey;
 		<?php echo " Dari tanggal ". $tgl. "&nbsp;&nbsp;&nbsp; Sampai tanggal " .$sdtgl; ?>
 	  </div>
 	  <?php
-	  // Ambil saldo awal manual (1 record saja)
+	  // RE-CALCULATE FOR PREMIUM WIDGETS
 	  $saldoAwalManual = 0;
 	  $saldoAwalKet = '';
 	  try {
@@ -229,7 +229,6 @@ document.onkeypress = stopRKey;
 	      }
 	  } catch (PDOException $e) {}
 
-	  // Hitung transaksi sebelum tanggal filter mulai
 	  $transaksiSebelumnya = 0;
 	  try {
 	      $qPrev = $conn->prepare("SELECT 
@@ -240,34 +239,73 @@ document.onkeypress = stopRKey;
 	      $transaksiSebelumnya = $qPrev->fetchColumn();
 	  } catch (PDOException $e) {}
 
-	  // Saldo awal efektif = manual + transaksi sebelum filter
-	  $saldoAwal = $saldoAwalManual + $transaksiSebelumnya;
+	  $saldoAwalLaporan = $saldoAwalManual + $transaksiSebelumnya;
+
+      // Stats for the selected date range
+      try {
+          $qStats = $conn->prepare("SELECT 
+              SUM(CASE WHEN plusmin = '+' THEN totalharga ELSE 0 END) as masuk,
+              SUM(CASE WHEN plusmin = '-' THEN totalharga ELSE 0 END) as keluar
+              FROM tkas WHERE tgltransaksi >= ? AND tgltransaksi <= ?");
+          $qStats->execute([$tgl, $sdtgl]);
+          $rStats = $qStats->fetch();
+          $total_masuk_range = $rStats['masuk'] ?: 0;
+          $total_keluar_range = $rStats['keluar'] ?: 0;
+          $saldo_akhir_laporan = $saldoAwalLaporan + $total_masuk_range - $total_keluar_range;
+      } catch (Exception $e) {
+          $total_masuk_range = 0; $total_keluar_range = 0; $saldo_akhir_laporan = 0;
+      }
 	  ?>
 
-	  <div style="background:#d9edf7; border:1px solid #bce8f1; border-radius:4px; padding:10px 15px; margin:10px 0;">
+      <!-- PREMIUM REPORT DASHBOARD -->
+      <div class="row" style="margin-top: 15px; margin-bottom: 25px;">
+          <div class="col-md-3">
+              <div style="background: white; padding: 15px 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); border-top: 4px solid #3498db; height: 110px;">
+                  <div style="font-size: 11px; font-weight: 600; color: #7f8c8d; text-transform: uppercase; letter-spacing: 1px;">Saldo Awal (<?php echo date('d/m/y', strtotime($tgl)); ?>)</div>
+                  <div style="font-size: 20px; font-weight: 700; color: #2c3e50; margin: 8px 0;">Rp <?php echo number_format($saldoAwalLaporan, 0, ',', '.'); ?></div>
+                  <div style="font-size: 10px; color: #bdc3c7;"><i class="fa fa-info-circle"></i> Termasuk saldo manual & transaksi lama</div>
+              </div>
+          </div>
+          <div class="col-md-3">
+              <div style="background: white; padding: 15px 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); border-top: 4px solid #27ae60; height: 110px;">
+                  <div style="font-size: 11px; font-weight: 600; color: #7f8c8d; text-transform: uppercase;">Total Masuk (Periode)</div>
+                  <div style="font-size: 20px; font-weight: 700; color: #27ae60; margin: 8px 0;">Rp <?php echo number_format($total_masuk_range, 0, ',', '.'); ?></div>
+                  <div style="font-size: 10px; color: #2ecc71;"><i class="fa fa-arrow-up"></i> Selama rentang tanggal terpilih</div>
+              </div>
+          </div>
+          <div class="col-md-3">
+              <div style="background: white; padding: 15px 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); border-top: 4px solid #e74c3c; height: 110px;">
+                  <div style="font-size: 11px; font-weight: 600; color: #7f8c8d; text-transform: uppercase;">Total Keluar (Periode)</div>
+                  <div style="font-size: 20px; font-weight: 700; color: #e74c3c; margin: 8px 0;">Rp <?php echo number_format($total_keluar_range, 0, ',', '.'); ?></div>
+                  <div style="font-size: 10px; color: #e74c3c;"><i class="fa fa-arrow-down"></i> Selama rentang tanggal terpilih</div>
+              </div>
+          </div>
+          <div class="col-md-3">
+              <div style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: white; padding: 15px 20px; border-radius: 12px; box-shadow: 0 6px 15px rgba(39, 174, 96, 0.3); height: 110px;">
+                  <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; opacity: 0.9;">Saldo Akhir (<?php echo date('d/m/y', strtotime($sdtgl)); ?>)</div>
+                  <div style="font-size: 22px; font-weight: 800; margin: 8px 0; text-shadow: 1px 1px 2px rgba(0,0,0,0.1);">Rp <?php echo number_format($saldo_akhir_laporan, 0, ',', '.'); ?></div>
+                  <div style="font-size: 10px; background: rgba(255,255,255,0.2); display: inline-block; padding: 2px 8px; border-radius: 10px;"><i class="fa fa-check"></i> Laporan Sinkron</div>
+              </div>
+          </div>
+      </div>
+
+	  <div style="background:#f4f7f6; border:1px solid #e1e8e6; border-radius:12px; padding:15px; margin-bottom:20px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);">
 	      <div style="display:flex; align-items:center; gap:15px; flex-wrap:wrap;">
-	          <strong>Saldo Awal Perusahaan :</strong>
+	          <strong style="color: #34495e;"><i class="fa fa-cog"></i> Pengaturan Saldo Awal Perusahaan :</strong>
 	          <div>
 	              <input type="text" id="input_saldo_awal" value="<?php echo number_format($saldoAwalManual, 0, ',', '.'); ?>" 
-	                     style="width:160px; text-align:right; font-weight:bold; padding:4px 8px;" 
-	                     class="form-control input-sm" placeholder="0"
+	                     style="width:180px; text-align:right; font-weight:bold; padding:6px 12px; border-radius: 6px; border: 1px solid #ced4da;" 
+	                     class="form-control" placeholder="0"
 	                     oninput="var v=this.value.replace(/[^0-9]/g,'');var f='';for(var i=0;i<v.length;i++){if(i>0&&(v.length-i)%3===0)f+='.';f+=v[i];}this.value=f;">
 	          </div>
 	          <div>
 	              <input type="text" id="input_saldo_ket" value="<?php echo htmlspecialchars($saldoAwalKet); ?>" 
-	                     style="width:150px; padding:4px 8px;" 
-	                     class="form-control input-sm" placeholder="Ket...">
+	                     style="width:200px; padding:6px 12px; border-radius: 6px; border: 1px solid #ced4da;" 
+	                     class="form-control" placeholder="Keterangan Saldo Awal...">
 	          </div>
 	          <div>
-	              <button type="button" id="btn_simpan_saldo" class="btn btn-info btn-sm" onclick="simpanSaldoAwal(this)">Simpan</button>
+	              <button type="button" id="btn_simpan_saldo" class="btn btn-primary" onclick="simpanSaldoAwal(this)" style="border-radius:6px; padding: 6px 20px; font-weight:600;">Simpan Saldo</button>
 	          </div>
-	      </div>
-	      <div style="margin-top:8px; font-size:12px; color:#555;">
-	          <span>Saldo awal perusahaan: <strong>Rp <?php echo number_format($saldoAwalManual, 0, ',', '.'); ?></strong></span>
-	          <?php if ($transaksiSebelumnya != 0) { ?>
-	          &nbsp;|&nbsp; Transaksi sebelum <?php echo date('d/m/Y', strtotime($tgl)); ?>: <strong>Rp <?php echo number_format($transaksiSebelumnya, 0, ',', '.'); ?></strong>
-	          <?php } ?>
-	          &nbsp;|&nbsp; <strong style="color:#31708f;">Saldo awal laporan: Rp <?php echo number_format($saldoAwal, 0, ',', '.'); ?></strong>
 	      </div>
 	  </div>
 

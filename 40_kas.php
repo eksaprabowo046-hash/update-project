@@ -266,14 +266,84 @@ while($raModal = $qaModal->fetch()) {
 
 ?>	 
 
-<body>
- 
+<?php
+// QUERY RINGKASAN SALDO (REAL-TIME)
+try {
+    // Total Saldo (Semua Transaksi)
+    $qTotal = $conn->query("SELECT 
+        SUM(CASE WHEN plusmin = '+' THEN totalharga ELSE 0 END) - 
+        SUM(CASE WHEN plusmin = '-' THEN totalharga ELSE 0 END) AS saldo_akhir
+        FROM tkas");
+    $saldo_akhir = $qTotal->fetchColumn() ?: 0;
+
+    // Saldo Awal Manual (dari par=41)
+    $qSaldoAwal = $conn->query("SELECT saldo_awal FROM tkas_saldo_awal LIMIT 1");
+    $saldo_awal_manual = $qSaldoAwal->fetchColumn() ?: 0;
+    
+    $saldo_total_real = $saldo_akhir + $saldo_awal_manual;
+
+    // Bulan Ini
+    $bln_ini = date('Y-m');
+    $qBulan = $conn->prepare("SELECT 
+        SUM(CASE WHEN plusmin = '+' THEN totalharga ELSE 0 END) as masuk,
+        SUM(CASE WHEN plusmin = '-' THEN totalharga ELSE 0 END) as keluar
+        FROM tkas WHERE tgltransaksi LIKE ?");
+    $qBulan->execute([$bln_ini . '%']);
+    $rBulan = $qBulan->fetch();
+    $kas_masuk = $rBulan['masuk'] ?: 0;
+    $kas_keluar = $rBulan['keluar'] ?: 0;
+
+    // Jumlah Kantong
+    $qKtg = $conn->query("SELECT COUNT(*) FROM tkantong");
+    $jml_kantong = $qKtg->fetchColumn() ?: 0;
+
+} catch (Exception $e) {
+    $saldo_total_real = 0; $kas_masuk = 0; $kas_keluar = 0; $jml_kantong = 0;
+}
+?>
+
 <div class="row"> 
-    <ol class="breadcrumb">
-      <li><i class="fa fa-home"></i>PENCATATAN KAS</li> 
-	</ol> 
-	<section class="panel">
-	  <header class="panel-heading">
+    <ol class="breadcrumb" style="background: linear-gradient(135deg, #1a237e 0%, #0d47a1 100%); color: white; border-radius: 8px; margin-bottom: 20px;">
+      <li><i class="fa fa-home" style="color: #64b5f6;"></i> <span style="font-weight: bold; letter-spacing: 1px;">PENCATATAN KAS & KEUANGAN</span></li> 
+    </ol>
+
+    <!-- PREMIUM FINANCIAL DASHBOARD -->
+    <div class="row" style="margin-bottom: 25px;">
+        <div class="col-md-4">
+            <div style="background: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%); color: white; padding: 25px; border-radius: 15px; box-shadow: 0 10px 20px rgba(0,0,0,0.2); position: relative; overflow: hidden; height: 140px;">
+                <div style="position: absolute; right: -10px; bottom: -10px; opacity: 0.1; font-size: 100px; transform: rotate(-15deg);"><i class="fa fa-bank"></i></div>
+                <div style="font-size: 14px; font-weight: 300; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 5px;">Total Saldo Perusahaan</div>
+                <div style="font-size: 32px; font-weight: 800; text-shadow: 2px 2px 4px rgba(0,0,0,0.3);">Rp <?php echo number_format($saldo_total_real, 0, ',', '.'); ?></div>
+                <div style="margin-top: 10px; font-size: 12px; background: rgba(255,255,255,0.1); display: inline-block; padding: 3px 10px; border-radius: 20px;">
+                    <i class="fa fa-shield"></i> Sinkronisasi Real-Time
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div style="background: white; padding: 20px; border-radius: 15px; box-shadow: 0 5px 15px rgba(0,0,0,0.05); border-left: 5px solid #27ae60; height: 140px;">
+                <div style="color: #666; font-size: 12px; font-weight: 600; text-transform: uppercase;">Masuk (Bulan Ini)</div>
+                <div style="color: #27ae60; font-size: 24px; font-weight: 700; margin: 10px 0;">Rp <?php echo number_format($kas_masuk, 0, ',', '.'); ?></div>
+                <div style="font-size: 11px; color: #999;"><i class="fa fa-arrow-up"></i> Total pemasukan arus kas</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div style="background: white; padding: 20px; border-radius: 15px; box-shadow: 0 5px 15px rgba(0,0,0,0.05); border-left: 5px solid #e74c3c; height: 140px;">
+                <div style="color: #666; font-size: 12px; font-weight: 600; text-transform: uppercase;">Keluar (Bulan Ini)</div>
+                <div style="color: #e74c3c; font-size: 24px; font-weight: 700; margin: 10px 0;">Rp <?php echo number_format($kas_keluar, 0, ',', '.'); ?></div>
+                <div style="font-size: 11px; color: #999;"><i class="fa fa-arrow-down"></i> Total pengeluaran arus kas</div>
+            </div>
+        </div>
+        <div class="col-md-2">
+            <div style="background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); padding: 20px; border-radius: 15px; box-shadow: 0 5px 15px rgba(0,0,0,0.05); text-align: center; height: 140px;">
+                <div style="color: #1a237e; font-size: 40px; font-weight: 800; margin-bottom: 0;"><?php echo $jml_kantong; ?></div>
+                <div style="color: #555; font-size: 12px; font-weight: 600;">Kantong Aktif</div>
+                <div style="margin-top: 10px;"><a href="index.php?par=40a" style="font-size: 11px; text-decoration: none; color: #0d47a1; font-weight: bold;">Kelola <i class="fa fa-chevron-right"></i></a></div>
+            </div>
+        </div>
+    </div>
+
+	<section class="panel" style="border-radius: 15px; box-shadow: 0 5px 20px rgba(0,0,0,0.05); overflow: hidden;">
+	  <header class="panel-heading" style="background: #f8f9fa; border-bottom: 1px solid #eee; padding: 20px;">
 		  
 		  <form role="form" method="POST" action="index.php?par=40" enctype="multipart/form-data"> 
 			 

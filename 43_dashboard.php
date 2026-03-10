@@ -190,6 +190,32 @@ try {
         elseif ($isSelesai) $detailLogSelesai[] = $row;
     }
 } catch (PDOException $e) {}
+
+// --- DATA KEUANGAN UNTUK DASHBOARD ---
+try {
+    // Total Saldo (Semua Transaksi + Saldo Awal Manual)
+    $qSaldoAwal = $conn->query("SELECT saldo_awal FROM tkas_saldo_awal LIMIT 1");
+    $awal_man = $qSaldoAwal->fetchColumn() ?: 0;
+    
+    $qTotal = $conn->query("SELECT 
+        SUM(CASE WHEN plusmin = '+' THEN totalharga ELSE 0 END) - 
+        SUM(CASE WHEN plusmin = '-' THEN totalharga ELSE 0 END) AS net
+        FROM tkas");
+    $saldo_total = ($qTotal->fetchColumn() ?: 0) + $awal_man;
+
+    // Masuk & Keluar Bulan Ini
+    $bln_ini = date('Y-m');
+    $qBln = $conn->prepare("SELECT 
+        SUM(CASE WHEN plusmin = '+' THEN totalharga ELSE 0 END) as masuk,
+        SUM(CASE WHEN plusmin = '-' THEN totalharga ELSE 0 END) as keluar
+        FROM tkas WHERE tgltransaksi LIKE ?");
+    $qBln->execute([$bln_ini . '%']);
+    $rBln = $qBln->fetch();
+    $d_kas_masuk = $rBln['masuk'] ?: 0;
+    $d_kas_keluar = $rBln['keluar'] ?: 0;
+} catch (Exception $e) {
+    $saldo_total = 0; $d_kas_masuk = 0; $d_kas_keluar = 0;
+}
 ?>
 
 <style>
@@ -277,6 +303,38 @@ try {
     </ol>
 
     <div class="dashboard-container">
+
+        <!-- SECTION: Keuangan Real-Time -->
+        <div class="section-title"><i class="fa fa-money"></i> Ringkasan Keuangan Real-Time</div>
+        <div class="dashboard-row">
+            <div class="dashboard-col dashboard-col-4">
+                <div class="stat-card" style="background: linear-gradient(135deg, #021B79 0%, #0575E6 100%); color: white; border: none;">
+                    <div class="stat-icon" style="background: rgba(255,255,255,0.2);"><i class="fa fa-bank"></i></div>
+                    <div class="stat-info">
+                        <h3 style="color: white;">Rp <?php echo number_format($saldo_total, 0, ',', '.'); ?></h3>
+                        <p style="color: rgba(255,255,255,0.8);">Total Saldo Kas</p>
+                    </div>
+                </div>
+            </div>
+            <div class="dashboard-col dashboard-col-4">
+                <div class="stat-card" style="border-left: 5px solid #27ae60;">
+                    <div class="stat-icon bg-success-soft"><i class="fa fa-arrow-up"></i></div>
+                    <div class="stat-info">
+                        <h3>Rp <?php echo number_format($d_kas_masuk, 0, ',', '.'); ?></h3>
+                        <p>Kas Masuk (Bulan Ini)</p>
+                    </div>
+                </div>
+            </div>
+            <div class="dashboard-col dashboard-col-4">
+                <div class="stat-card" style="border-left: 5px solid #e74c3c;">
+                    <div class="stat-icon bg-danger-soft"><i class="fa fa-arrow-down"></i></div>
+                    <div class="stat-info">
+                        <h3>Rp <?php echo number_format($d_kas_keluar, 0, ',', '.'); ?></h3>
+                        <p>Kas Keluar (Bulan Ini)</p>
+                    </div>
+                </div>
+            </div>
+        </div>
 
         <!-- SECTION: Kehadiran Hari Ini -->
         <div class="section-title"><i class="fa fa-clock-o"></i> Kehadiran Hari Ini (<?php echo date('d-m-Y'); ?>)</div>
