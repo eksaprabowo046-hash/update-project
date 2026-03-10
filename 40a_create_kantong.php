@@ -215,8 +215,118 @@ if (isset($_POST['transfer_saldo'])) {
     }
 }
 
+// POST Handler: Impor Kantong dari Excel
+if (isset($_POST['proses_import_kantong'])) {
+    if (isset($_FILES['file_excel']) && $_FILES['file_excel']['error'] == UPLOAD_ERR_OK) {
+        $file_tmp = $_FILES['file_excel']['tmp_name'];
+        try {
+            require 'vendor/autoload.php';
+            if (!class_exists('ZipArchive')) {
+                $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReader('Xls');
+            } else {
+                $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReaderForFile($file_tmp);
+            }
+            
+            $spreadsheet = $reader->load($file_tmp);
+            $datas = $spreadsheet->getActiveSheet()->toArray();
+            $succ_ins = 0; $succ_upd = 0; $succ_adj = 0;
+            
+            $conn->beginTransaction();
+            
+            for ($i = 1; $i < count($datas); $i++) {
+                $id_k = trim($datas[$i][0] ?? '');
+                $nama_k = trim($datas[$i][1] ?? '');
+                $desk_k = trim($datas[$i][2] ?? '');
+                
+                // UNIVERSAL FINANCE PARSER (V4) - Anti Bug Nol Hilang
+                $raw = trim($datas[$i][3] ?? '0');
+                $clean = str_replace(['Rp', ' ', 'rp'], '', $raw);
+                
+                $has_dot = (strpos($clean, '.') !== false);
+                $has_comma = (strpos($clean, ',') !== false);
+                
+                if ($has_dot && $has_comma) {
+                    $dot_p = strrpos($clean, '.');
+                    $comma_p = strrpos($clean, ',');
+                    if ($dot_p > $comma_p) {
+                        // US Format: 1,000.00 -> Dot is decimal
+                        $clean = str_replace(',', '', $clean);
+                    } else {
+                        // ID Format: 1.000,00 -> Comma is decimal
+                        $clean = str_replace('.', '', $clean);
+                        $clean = str_replace(',', '.', $clean);
+                    }
+                } elseif ($has_dot) {
+                    // Only dots. 1.000 or 1.000.000 or 1.5
+                    if (substr_count($clean, '.') > 1 || preg_match('/\.\d{3}$/', $clean)) {
+                        $clean = str_replace('.', '', $clean);
+                    }
+                } elseif ($has_comma) {
+                    // Only commas. 1,000 or 1,5
+                    if (substr_count($clean, ',') > 1 || preg_match('/,\d{3}$/', $clean)) {
+                        $clean = str_replace(',', '', $clean);
+                    } else {
+                        $clean = str_replace(',', '.', $clean);
+                    }
+                }
+                
+                $saldo_excel = floatval($clean);
+                
+                if (empty($nama_k)) continue;
+                
+                if (empty($id_k)) {
+                    // NEW KANTONG
+                    $id_baru = generateIdKantong($conn);
+                    $qins = $conn->prepare("INSERT INTO tkantong (id_kantong, nama_kantong, deskripsi, history_kantong, created_by) VALUES (?, ?, ?, ?, ?)");
+                    $qins->execute([$id_baru, $nama_k, $desk_k, "Dibuat via Excel", $iduser]);
+                    
+                    if ($saldo_excel != 0) {
+                        $def_akun = getDefaultKodakun($conn);
+                        $notrans = generateNoTransaksi($conn);
+                        $plusmin = ($saldo_excel > 0) ? '+' : '-';
+                        $nominal = abs($saldo_excel);
+                        $qkas = $conn->prepare("INSERT INTO tkas (notransaksi, tgltransaksi, kodakun, deskripsi, satuan, plusmin, jumlah, hargaunit, totalharga, iduser_proses, id_kantong) VALUES (?, ?, ?, ?, 'Saldo Awal', ?, 1, ?, ?, ?, ?)");
+                        $qkas->execute([$notrans, date('Y-m-d'), $def_akun, "Saldo Awal via Excel", $plusmin, $nominal, $nominal, $iduser, $id_baru]);
+                    }
+                    $succ_ins++;
+                } else {
+                    // UPDATE EXISTING (Nama & Deskripsi)
+                    $qupd = $conn->prepare("UPDATE tkantong SET nama_kantong = ?, deskripsi = ? WHERE id_kantong = ?");
+                    $qupd->execute([$nama_k, $desk_k, $id_k]);
+                    
+                    // Cek Selisih Saldo untuk Adjustment Otomatis
+                    $current_saldo = getSaldoKantong($conn, $id_k);
+                    if (abs($saldo_excel - $current_saldo) > 0.01) {
+                        $diff = $saldo_excel - $current_saldo;
+                        $plusmin = ($diff > 0) ? '+' : '-';
+                        $nominal = abs($diff);
+                        $notrans = generateNoTransaksi($conn);
+                        $def_akun = getDefaultKodakun($conn);
+                        
+                        $qadj = $conn->prepare("INSERT INTO tkas (notransaksi, tgltransaksi, kodakun, deskripsi, satuan, plusmin, jumlah, hargaunit, totalharga, iduser_proses, id_kantong) VALUES (?, ?, ?, ?, 'Adjustment', ?, 1, ?, ?, ?, ?)");
+                        $qadj->execute([$notrans, date('Y-m-d'), $def_akun, "Penyesuaian Saldo via Excel", $plusmin, $nominal, $nominal, $iduser, $id_k]);
+                        $succ_adj++;
+                    }
+                    $succ_upd++;
+                }
+            }
+            $conn->commit();
+            $pesan = "<div class='alert alert-info' style='border-radius:15px; background:rgba(232, 245, 233, 0.9); color:#2e7d32; border:1px solid #c8e6c9;'>
+                        <i class='fa fa-check-circle'></i> <b>Sinkronisasi Selesai!</b><br>
+                        - $succ_ins Kantong Baru Dibuat<br>
+                        - $succ_upd Informasi Kantong Diperbarui<br>
+                        - $succ_adj Saldo Telah Disamakan Persis dengan Excel
+                      </div>";
+        } catch (Exception $e) {
+            if ($conn->inTransaction()) $conn->rollBack();
+            $pesan = "<div class='alert alert-danger' style='border-radius:15px;'>Gagal impor: " . $e->getMessage() . "</div>";
+        }
+    }
+}
+
 // Function untuk generate No Transaksi (copy dari 40_kas.php)
 function generateNoTransaksi($conn) {
+    static $last_new_num = 0;
     $prefix = 'TRF-' . date('Ym') . '-';
     $sql = "SELECT notransaksi FROM tkas WHERE notransaksi LIKE :prefix ORDER BY notransaksi DESC LIMIT 1";
     $q = $conn->prepare($sql);
@@ -225,16 +335,18 @@ function generateNoTransaksi($conn) {
     
     if ($row) {
         $lastNum = (int) substr($row['notransaksi'], -4);
-        $newNum = $lastNum + 1;
+        $newNum = max($lastNum + 1, $last_new_num + 1);
     } else {
-        $newNum = 1;
+        $newNum = max(1, $last_new_num + 1);
     }
     
+    $last_new_num = $newNum;
     return $prefix . str_pad($newNum, 4, '0', STR_PAD_LEFT);
 }
 
 // Function untuk generate ID Kantong otomatis
 function generateIdKantong($conn) {
+    static $last_k_num = 0;
     $prefix = 'KANTONG';
     $sql = "SELECT id_kantong FROM tkantong WHERE id_kantong LIKE :prefix ORDER BY id_kantong DESC LIMIT 1";
     $q = $conn->prepare($sql);
@@ -244,11 +356,12 @@ function generateIdKantong($conn) {
     if ($row) {
         // e.g. KANTONG001 -> 001
         $lastNum = (int) substr($row['id_kantong'], 7);
-        $newNum = $lastNum + 1;
+        $newNum = max($lastNum + 1, $last_k_num + 1);
     } else {
-        $newNum = 1;
+        $newNum = max(1, $last_k_num + 1);
     }
     
+    $last_k_num = $newNum;
     return $prefix . str_pad($newNum, 3, '0', STR_PAD_LEFT);
 }
 
@@ -292,43 +405,90 @@ function getSaldoKantong($conn, $id_kantong) {
 <body>
  
 <style>
-/* Custom styling untuk halaman Kantong agar lebih menarik */
+/* PREMIUM UI V2 - Visual Excellence */
+:root {
+    --primary-gradient: linear-gradient(135deg, #2c3e50 0%, #4ca1af 100%);
+    --success-gradient: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+    --danger-gradient: linear-gradient(135deg, #cb2d3e 0%, #ef473a 100%);
+    --warning-gradient: linear-gradient(135deg, #f2994a 0%, #f2c94c 100%);
+    --glass-shadow: 0 10px 40px -10px rgba(0, 64, 128, 0.2);
+}
+
+@keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
 .kantong-card {
-    background: #fff;
-    border-radius: 8px;
-    box-shadow: 0 4px 10px rgba(0,0,0,0.08);
-    margin-bottom: 25px;
-    border: none;
-    transition: transform 0.2s;
-}
-.kantong-card:hover {
-    box-shadow: 0 6px 15px rgba(0,0,0,0.12);
-}
-.kantong-header {
-    background: linear-gradient(135deg, #1e88e5 0%, #1565c0 100%);
-    color: white;
-    border-radius: 8px 8px 0 0;
-    padding: 15px 20px;
-    font-weight: 600;
-}
-.kantong-header.transfer {
-    background: linear-gradient(135deg, #43a047 0%, #2e7d32 100%);
-}
-.kantong-header.topup {
-    background: linear-gradient(135deg, #ffb300 0%, #f39c12 100%);
-}
-.kantong-body {
-    padding: 20px;
-}
-.table-kantong {
-    background: #fff;
-    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    box-shadow: var(--glass-shadow);
+    margin-bottom: 30px;
+    animation: fadeInUp 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+    transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
     overflow: hidden;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
 }
-.table-kantong thead {
-    background-color: #f4f6f9;
-    color: #333;
+
+.kantong-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 20px 50px -15px rgba(0, 64, 128, 0.25);
+}
+
+.kantong-header {
+    background: var(--primary-gradient);
+    color: white;
+    border-radius: 20px 20px 0 0;
+    padding: 20px 30px;
+    font-weight: 800;
+    font-size: 18px;
+    letter-spacing: 0.5px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.kantong-header.transfer { background: var(--success-gradient); }
+.kantong-header.topup { background: var(--warning-gradient); }
+
+.kantong-body { padding: 30px; }
+
+/* Table Styling Enhancement */
+.table-hover tbody tr {
+    transition: all 0.3s ease;
+}
+
+.table-hover tbody tr:hover {
+    background-color: rgba(30, 136, 229, 0.05) !important;
+    transform: scale(1.008);
+}
+
+.badge-premium {
+    padding: 8px 15px;
+    border-radius: 25px;
+    font-weight: 800;
+    font-size: 14px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    display: inline-block;
+}
+
+.btn-premium {
+    border-radius: 25px;
+    font-weight: 800;
+    text-transform: uppercase;
+    font-size: 12px;
+    letter-spacing: 1px;
+    padding: 10px 20px;
+    transition: all 0.3s;
+    border: none;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+}
+
+.btn-premium:hover {
+    transform: translateY(-3px) scale(1.05);
+    box-shadow: 0 8px 25px rgba(0,0,0,0.15);
 }
 </style>
 
@@ -508,22 +668,25 @@ function getSaldoKantong($conn, $id_kantong) {
           </div>
       </div>
 	  
-	  <!-- Box Tabel -->
-      <div class="panel kantong-card">
-          <div class="kantong-header" style="background: #455a64;">
-              <i class="fa fa-list"></i> Daftar Seluruh Kantong
+ 	  <!-- Box Tabel -->
+      <div class="panel kantong-card" style="overflow: hidden;">
+          <div class="kantong-header" style="background: #455a64; display: flex; justify-content: space-between; align-items: center; padding: 12px 20px;">
+              <span style="font-size: 16px;"><i class="fa fa-list"></i> Daftar Seluruh Kantong</span>
+              <button type="button" class="btn btn-info btn-sm" onclick="document.getElementById('modalImportKantong').style.display='block'" style="font-weight: bold; border-radius: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.2);">
+                 <i class="fa fa-file-excel-o"></i> Kelola Kantong (Excel)
+              </button>
           </div>
-          <div class="kantong-body">
-	   <table id="tabel_kantong" class="table table-bordered table-striped table-hover table-kantong"> 
-		  <thead> 
-			<tr>
-			  <th>#</th>
-              <th>Nama Kantong</th>
-              <th>Deskripsi</th>
-              <th>Saldo</th>
-              <th>Dibuat Oleh</th>
-              <th>Dibuat Tanggal</th>
-              <th>Aksi</th>
+          <div class="kantong-body" style="padding: 0;">
+	   <div class="table-responsive">
+	   <table id="tabel_kantong" class="table table-hover" style="margin-bottom: 0;"> 
+		  <thead style="background: #f8f9fa;"> 
+			<tr style="color: #607d8b; font-weight: 800; text-transform: uppercase; font-size: 12px;">
+			  <th style="padding: 15px; text-align: center;">#</th>
+              <th style="padding: 15px;">Informasi Kantong</th>
+              <th style="padding: 15px;">Deskripsi</th>
+              <th style="padding: 15px;">Saldo Terkini</th>
+              <th style="padding: 15px;">Admin / Waktu</th>
+              <th style="padding: 15px; text-align: center;">Aksi Cepat</th>
             </tr>
 		  </thead>
 		  <tbody>
@@ -532,35 +695,66 @@ function getSaldoKantong($conn, $id_kantong) {
 			        $sql = $conn->prepare("SELECT * FROM tkantong ORDER BY created_at DESC"); 
 					$sql->execute();				
 					$no=1;
+                    $total_seluruh_saldo = 0;
                     while($rs = $sql->fetch()) { 
                         $saldo = getSaldoKantong($conn, $rs['id_kantong']);
-					    echo "   <tr>
-						  <td align=center><font size=-1>".$no."</font></td>
-                          <td><font size=-1>".$rs['nama_kantong']."</font></td>
-                          <td><font size=-1>".$rs['deskripsi']."</font></td>
-                          <td><font size=-1 color='".($saldo >= 0 ? 'green' : 'red')."'><strong>Rp ".number_format($saldo, 0, ',', '.')."</strong></font></td>
-                          <td><font size=-1>".$rs['created_by']."</font></td>
-                          <td><font size=-1>".date('d/m/Y H:i', strtotime($rs['created_at']))."</font></td>
-                          <td align=center>
+                        $is_positive = ($saldo >= 0);
+                        
+					    echo "   <tr class='premium-row'>
+						  <td align=center style='vertical-align: middle;'>
+                             <div class='badge' style='background: var(--primary-gradient); color: white; width: 30px; height: 30px; line-height: 22px; border-radius: 50%; box-shadow: 0 4px 8px rgba(0,0,0,0.1); border: 2px solid white;'>".$no."</div>
+                          </td>
+                          <td style='vertical-align: middle;'>
+                             <div style='font-weight: 800; color: #2c3e50; font-size: 16px; letter-spacing: -0.3px;'>".htmlspecialchars($rs['nama_kantong'])."</div>
+                             <div style='font-size: 11px; color: #7f8c8d; font-weight: 700; text-transform: uppercase;'>ID: <code style='background:#ecf0f1; padding: 2px 5px; border-radius: 4px; color:#2980b9;'>".htmlspecialchars($rs['id_kantong'])."</code></div>
+                          </td>
+                          <td style='vertical-align: middle;'>
+                             <div style='font-size: 13px; color: #34495e; font-weight: 500;'>".(empty($rs['deskripsi']) ? '<i style="color:#bdc3c7;">Tidak ada deskripsi</i>' : htmlspecialchars($rs['deskripsi']))."</div>
+                          </td>
+                          <td style='vertical-align: middle;'>
+                             <div class='badge-premium' style='background: ".($is_positive ? 'rgba(39, 174, 96, 0.1)' : 'rgba(231, 76, 60, 0.1)')."; color: ".($is_positive ? '#27ae60' : '#e74c3c')."; border: 1.5px solid ".($is_positive ? 'rgba(39, 174, 96, 0.2)' : 'rgba(231, 76, 60, 0.2)')."; width: 100%; text-align: right; min-width: 140px; font-size: 15px; font-family: \"Courier New\", Courier, monospace;'>
+                                <i class='fa fa-money'></i> Rp ".number_format($saldo, 0, ',', '.')."
+                             </div>
+                          </td>
+                          <td style='vertical-align: middle;'>
+                             <div style='font-size: 12px; font-weight: 700; color: #2c3e50;'><i class='fa fa-user-shield'></i> ".htmlspecialchars($rs['created_by'])."</div>
+                             <div style='font-size: 11px; color: #95a5a6;'><i class='fa fa-calendar-alt'></i> ".date('d M Y', strtotime($rs['created_at']))."</div>
+                          </td>
+                          <td align=center style='vertical-align: middle;'>
                           ";
                           
-                          echo "<button class='btn btn-success btn-xs' onclick=\"tambahSaldo('".$rs['id_kantong']."', '".$rs['nama_kantong']."')\" title='Tambah Saldo' style='margin-right:4px;'><i class='fa fa-plus'></i> Saldo</button>";
+                          echo "<button class='btn btn-success btn-premium' onclick=\"tambahSaldo('".$rs['id_kantong']."', '".$rs['nama_kantong']."')\" title='Kelola Saldo' style='background: var(--success-gradient); color:white; margin-right:5px;'><i class='fa fa-plus-circle'></i> Saldo</button>";
                           
-                          echo "<a href='index.php?par=40a&del=Y&id=".$rs['id_kantong']."' class='btn btn-danger btn-xs' onclick=\"return confirm('Yakin hapus kantong ini? Peringatan: Seluruh histori transaksi dan saldo dari kantong ini juga akan ikut terhapus secara permanen dari Kas!')\"><i class='fa fa-trash'></i> Delete</a>";
+                          echo "<a href='index.php?par=40a&del=Y&id=".$rs['id_kantong']."' class='btn btn-danger btn-premium' style='background: var(--danger-gradient); color:white;' onclick=\"return confirm('Hapus Kantong ini?')\"><i class='fa fa-trash'></i> Hapus</a>";
 
                           
 					    echo "
 					  </td> 
 					</tr> ";
 					$no++;
+                    $total_seluruh_saldo += $saldo;
                     }
 		   }//try
 		   catch (PDOException $e)	{
-		     echo "<tr><td colspan='7' align='center'><font color=red>Error mengambil data: ".$e->getMessage()."</font></td></tr>";
+		     echo "<tr><td colspan='6' align='center'><font color=red>Error mengambil data: ".$e->getMessage()."</font></td></tr>";
 		   }//catch
 		  ?>
 		  </tbody>
+          <tfoot style="background: rgba(236, 240, 241, 0.5); border-top: 2px solid #bdc3c7;">
+             <tr>
+                <td colspan="3" style="padding: 15px 30px; font-weight: 800; color: #2c3e50; font-size: 14px; text-transform: uppercase;">
+                   <i class="fa fa-chart-pie"></i> Konsolidasi Dana Seluruh Kantong
+                </td>
+                <td style="padding: 15px; text-align: right;">
+                    <div style="font-weight: 900; font-size: 18px; color: #2980b9;">
+                        Rp <?php echo number_format($total_seluruh_saldo ?? 0, 0, ',', '.'); ?>
+                    </div>
+                </td>
+                <td colspan="2"></td>
+             </tr>
+          </tfoot>
 	   </table>
+	   </div>
 	  </div>
       </div>
 	</section>
@@ -594,5 +788,36 @@ function tambahSaldo(idKantong, namaKantong) {
     }
 }
 </script>
+
+<!-- Modal Import Kantong (Pusat Kontrol Excel) -->
+<div id="modalImportKantong" class="modal">
+    <div class="modal-content" style="max-width: 500px; border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.2);">
+        <span class="close" onclick="document.getElementById('modalImportKantong').style.display='none'" style="font-size: 28px;">&times;</span>
+        <h3 style="color: #455A64; font-weight: bold;"><i class="fa fa-folder-open"></i> Pusat Kontrol Kantong (Excel)</h3>
+        <p class="text-muted">Kelola kategori kantong masal (Mendukung .xls)</p>
+        <hr style="border-top: 2px solid #eee;">
+        
+        <!-- Langkah 1: Unduh -->
+        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #1e88e5;">
+            <h5 style="margin-top:0; font-weight:bold;">Langkah 1: Ambil Master Data</h5>
+            <p style="font-size: 13px;">Unduh daftar kantong yang sudah ada untuk diedit atau ditambah baru.</p>
+            <a href="40a_export_template_kantong.php" class="btn btn-primary btn-block" style="border-radius: 20px; background-color: #455A64 !important; border-color: #455A64 !important;">
+                <i class="fa fa-download"></i> Unduh Tabel Kantong
+            </a>
+        </div>
+
+        <!-- Langkah 2: Unggah -->
+        <div style="background: #fdfdfe; padding: 15px; border-radius: 8px; border: 1px dashed #455A64;">
+            <h5 style="margin-top:0; font-weight:bold;">Langkah 2: Unggah Perubahan</h5>
+            <p style="font-size: 13px;">ID yang kosong akan dianggap sebagai Kantong Baru.</p>
+            <form action="" method="POST" enctype="multipart/form-data">
+                <input type="file" name="file_excel" accept=".xls,.xlsx" required class="form-control" style="margin-bottom: 15px;">
+                <button type="submit" name="proses_import_kantong" class="btn btn-success btn-block" style="border-radius: 20px; font-weight: bold;">
+                    <i class="fa fa-upload"></i> Proses Data Kantong
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
 
 </body>

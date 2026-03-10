@@ -74,6 +74,67 @@ if (isset($_POST['submit_thr'])) {
     }
 }
 
+// POST Handler: Impor THR dari Excel
+if (isset($_POST['proses_import_thr'])) {
+    if (isset($_FILES['file_excel']) && $_FILES['file_excel']['error'] == UPLOAD_ERR_OK) {
+        $file_tmp = $_FILES['file_excel']['tmp_name'];
+        try {
+            require 'vendor/autoload.php';
+            // Pengaman ZipArchive
+            if (!class_exists('ZipArchive')) {
+                $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReader('Xls');
+            } else {
+                $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReaderForFile($file_tmp);
+            }
+            
+            $spreadsheet = $reader->load($file_tmp);
+            $datas = $spreadsheet->getActiveSheet()->toArray();
+            $succ = 0;
+            
+            // Baris 1 header, mulai baris 2 (index 1)
+            for ($i = 1; $i < count($datas); $i++) {
+                $idpegawai = trim($datas[$i][0] ?? '');
+                $tahun = trim($datas[$i][2] ?? '');
+                // UNIVERSAL FINANCE PARSER (V4) - Anti Bug Nol Hilang
+                $raw_nom = trim($datas[$i][5] ?? '0');
+                $clean_nom = str_replace(['Rp', ' ', 'rp'], '', $raw_nom);
+                $has_dot = (strpos($clean_nom, '.') !== false);
+                $has_comma = (strpos($clean_nom, ',') !== false);
+                if ($has_dot && $has_comma) {
+                    $dot_p = strrpos($clean_nom, '.'); $comma_p = strrpos($clean_nom, ',');
+                    if ($dot_p > $comma_p) { $clean_nom = str_replace(',', '', $clean_nom); }
+                    else { $clean_nom = str_replace('.', '', $clean_nom); $clean_nom = str_replace(',', '.', $clean_nom); }
+                } elseif ($has_dot) {
+                    if (substr_count($clean_nom, '.') > 1 || preg_match('/\.\d{3}$/', $clean_nom)) { $clean_nom = str_replace('.', '', $clean_nom); }
+                } elseif ($has_comma) {
+                    if (substr_count($clean_nom, ',') > 1 || preg_match('/,\d{3}$/', $clean_nom)) { $clean_nom = str_replace(',', '', $clean_nom); }
+                    else { $clean_nom = str_replace(',', '.', $clean_nom); }
+                }
+                $nominal = floatval($clean_nom);
+                
+                if (empty($idpegawai) || empty($tahun)) continue;
+                $periode = $tahun . '-12';
+                
+                // Smart Update (Upsert)
+                $check = $conn->prepare("SELECT id FROM tgaji WHERE iduser_pegawai = ? AND periode = ? AND status_gaji = 'THR'");
+                $check->execute([$idpegawai, $periode]);
+                
+                if ($check->rowCount() > 0) {
+                    $q = $conn->prepare("UPDATE tgaji SET thr = ?, tgl_input = NOW() WHERE iduser_pegawai = ? AND periode = ? AND status_gaji = 'THR'");
+                    $q->execute([$nominal, $idpegawai, $periode]);
+                } else {
+                    $q = $conn->prepare("INSERT INTO tgaji (iduser_pegawai, periode, thr, status_gaji, tgl_input) VALUES (?, ?, ?, 'THR', NOW())");
+                    $q->execute([$idpegawai, $periode, $nominal]);
+                }
+                $succ++;
+            }
+            $pesan = "Berhasil memproses $succ data THR dari Excel.";
+        } catch (Exception $e) {
+            $pesan = "Gagal impor THR: " . $e->getMessage();
+        }
+    }
+}
+
 $filter_tahun = $_GET['filter_tahun'] ?? date('Y');
 ?>
 
@@ -214,6 +275,9 @@ $filter_tahun = $_GET['filter_tahun'] ?? date('Y');
                     </div>
                     <button type="submit" class="btn btn-primary">Tampilkan</button>
                     <button type="button" class="btn btn-success" data-toggle="modal" data-target="#modalAddThr">Input THR Baru</button>
+                    <button type="button" class="btn btn-info" onclick="document.getElementById('modalImportThr').style.display='block'">
+                       <i class="fa fa-file-excel-o"></i> Kelola THR (Excel)
+                    </button>
                 </form>
             </header>
             
@@ -326,6 +390,37 @@ $filter_tahun = $_GET['filter_tahun'] ?? date('Y');
                 </div>
             </div>
         </form>
+    </div>
+</div>
+
+<!-- Modal Import THR (Pusat Kontrol Excel) -->
+<div id="modalImportThr" class="modal">
+    <div class="modal-content" style="max-width: 500px; border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.2);">
+        <span class="close" onclick="document.getElementById('modalImportThr').style.display='none'" style="font-size: 28px;">&times;</span>
+        <h3 style="color: #2D5A27; font-weight: bold;"><i class="fa fa-gift"></i> Pusat Kontrol THR (Excel)</h3>
+        <p class="text-muted">Kelola THR masal dengan format .xls</p>
+        <hr style="border-top: 2px solid #eee;">
+        
+        <!-- Langkah 1: Unduh -->
+        <div style="background: #e9f5e8; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #d4af37;">
+            <h5 style="margin-top:0; font-weight:bold;">Langkah 1: Ambil Data Pegawai</h5>
+            <p style="font-size: 13px;">Unduh file yang sudah terisi otomatis dengan estimasi THR periode ini.</p>
+            <a href="56_export_template_thr.php?tahun=<?= $filter_tahun ?>" class="btn btn-success btn-block" style="border-radius: 20px; background-color: #2D5A27 !important;">
+                <i class="fa fa-download"></i> Unduh Tabel THR (Otomatis)
+            </a>
+        </div>
+
+        <!-- Langkah 2: Unggah -->
+        <div style="background: #fdfdfe; padding: 15px; border-radius: 8px; border: 1px dashed #2D5A27;">
+            <h5 style="margin-top:0; font-weight:bold;">Langkah 2: Unggah Hasil Edit</h5>
+            <p style="font-size: 13px;">Simpan perubahan di Excel Anda, lalu unggah di sini.</p>
+            <form action="" method="POST" enctype="multipart/form-data">
+                <input type="file" name="file_excel" accept=".xls,.xlsx" required class="form-control" style="margin-bottom: 15px;">
+                <button type="submit" name="proses_import_thr" class="btn btn-primary btn-block" style="border-radius: 20px; font-weight: bold; background-color: #d4af37 !important; border-color: #d4af37 !important;">
+                    <i class="fa fa-upload"></i> Perbarui THR Sekarang
+                </button>
+            </form>
+        </div>
     </div>
 </div>
 

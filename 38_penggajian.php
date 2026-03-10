@@ -39,8 +39,88 @@ function get_pot_pinjaman_auto($conn, $iduser, $periode = null) {
 }
 
 // AJAX Handler: Ambil data gaji berdasarkan ID
-if (isset($_GET['ajax']) && $_GET['ajax'] == 'get_gaji_data') {
+if (isset($_GET['ajax'])) {
+    if ($_GET['ajax'] == 'get_gaji_data') {
+        $id = $_GET['id'] ?? 0;
+        try {
+            $q = $conn->prepare("
+                SELECT g.*, ru.nama AS nama_pegawai 
+                FROM tgaji g 
+                LEFT JOIN ruser ru ON g.iduser_pegawai = ru.iduser 
+                WHERE g.id = :id
+            ");
+            $q->execute([':id' => $id]);
+            $data = $q->fetch(PDO::FETCH_ASSOC);
 
+            if ($data) {
+                // Tambahan info untuk info_cicilan_aktif & info_lembur_aktif di modal
+                $data['cicilan_pinjaman_aktif'] = get_pot_pinjaman_auto($conn, $data['iduser_pegawai'], $data['periode']);
+                
+                $qlembur = $conn->prepare("
+                    SELECT COUNT(*) AS jumlah_lembur
+                    FROM tdtllembur dl
+                    JOIN tlembur l ON dl.idlembur = l.id
+                    WHERE dl.iduser_pegawai = :iduser 
+                      AND l.status_approval = 'Approved'
+                      AND DATE_FORMAT(l.tgl_lembur, '%Y-%m') = :periode
+                ");
+                $qlembur->execute([':iduser' => $data['iduser_pegawai'], ':periode' => $data['periode']]);
+                $rlembur = $qlembur->fetch(PDO::FETCH_ASSOC);
+                $data['jumlah_lembur'] = intval($rlembur['jumlah_lembur']);
+                $data['lembur_auto'] = $data['jumlah_lembur'] * 90000;
+
+                echo json_encode($data);
+            } else {
+                echo json_encode(['error' => 'Data tidak ditemukan']);
+            }
+        } catch (Exception $e) {
+            echo json_encode(['error' => $e->getMessage()]);
+        }
+        exit;
+    }
+
+    if ($_GET['ajax'] == 'hitung_thr') {
+        $idpegawai = $_GET['idpegawai'] ?? '';
+        $periode = $_GET['periode'] ?? date('Y-m');
+        $gp = floatval($_GET['gaji_pokok'] ?? 0);
+        $tj = floatval($_GET['tunj_jabatan'] ?? 0);
+        $tahun_thr = substr($periode, 0, 4);
+
+        try {
+            $q = $conn->prepare("SELECT tgl_masuk FROM ruser WHERE iduser = :id");
+            $q->execute([':id' => $idpegawai]);
+            $user = $q->fetch(PDO::FETCH_ASSOC);
+
+            if ($user && !empty($user['tgl_masuk'])) {
+                $tgl_masuk = new DateTime($user['tgl_masuk']);
+                $tgl_akhir = new DateTime($tahun_thr . '-12-31');
+                
+                $diff = $tgl_masuk->diff($tgl_akhir);
+                $total_bulan = ($diff->y * 12) + $diff->m;
+                
+                $satuan_upah = $gp + $tj;
+                if ($total_bulan < 1) {
+                    $thr = 0;
+                } else if ($total_bulan >= 12) {
+                    $thr = $satuan_upah;
+                } else {
+                    $thr = ($total_bulan / 12) * $satuan_upah;
+                }
+
+                echo json_encode([
+                    'masa_kerja_bulan' => $total_bulan,
+                    'satuan_upah' => $satuan_upah,
+                    'thr' => round($thr)
+                ]);
+            } else {
+                echo json_encode(['error' => 'Data pegawai/tgl masuk tidak ditemukan']);
+            }
+        } catch (Exception $e) {
+            echo json_encode(['error' => $e->getMessage()]);
+        }
+        exit;
+    }
+}
 
 $pesan = "";
 $tglini = date('Y-m-d');
@@ -546,6 +626,137 @@ if (isset($_POST['generate_gaji'])) {
     }
 }
 
+// Proses Impor Excel
+if (isset($_POST['proses_import'])) {
+    if (isset($_FILES['file_excel']) && $_FILES['file_excel']['error'] == UPLOAD_ERR_OK) {
+        $file_tmp = $_FILES['file_excel']['tmp_name'];
+        
+        try {
+            require 'vendor/autoload.php';
+            
+            // Pengaman: Jika ZipArchive tidak ada, jangan gunakan autodetect (IOFactory::load) 
+            // karena ia akan mencoba memanggil reader Xlsx yang memicu fatal error.
+            if (!class_exists('ZipArchive')) {
+                // Jika Zip tidak ada, hanya bisa baca XLS
+                $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReader('Xls');
+            } else {
+                try {
+                    $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReaderForFile($file_tmp);
+                } catch (Exception $e) {
+                    throw new Exception("Format file tidak dikenali. Pastikan file adalah Excel (.xls atau .xlsx).");
+                }
+            }
+            
+            try {
+                $spreadsheet = $reader->load($file_tmp);
+            } catch (Exception $e) {
+                if (!class_exists('ZipArchive')) {
+                    throw new Exception("Server Anda tidak mendukung file .xlsx. Silakan unduh ulang template (format .xls) dan gunakan itu.");
+                } else {
+                    throw new Exception("Gagal membaca isi file: " . $e->getMessage());
+                }
+            }
+            
+            $datas = $spreadsheet->getActiveSheet()->toArray();
+            
+            $succ = 0;
+            $err = 0;
+            $errors = [];
+            
+            // Mulai dari baris ke-2 (index 1) karena baris 1 adalah header
+            for ($i = 1; $i < count($datas); $i++) {
+                $idpegawai = trim($datas[$i][0] ?? '');
+                // Index 1 sekarang adalah Nama Pegawai (Info), kita loncati
+                $periode = trim($datas[$i][2] ?? '');
+                
+                if (empty($idpegawai) || empty($periode)) continue;
+                
+                // UNIVERSAL FINANCE PARSER (V4) - Anti Bug Nol Hilang
+                $parseNum = function($raw) {
+                    $clean = str_replace(['Rp', ' ', 'rp'], '', trim($raw ?? '0'));
+                    $has_dot = (strpos($clean, '.') !== false);
+                    $has_comma = (strpos($clean, ',') !== false);
+                    if ($has_dot && $has_comma) {
+                        $dot_p = strrpos($clean, '.'); $comma_p = strrpos($clean, ',');
+                        if ($dot_p > $comma_p) { $clean = str_replace(',', '', $clean); }
+                        else { $clean = str_replace('.', '', $clean); $clean = str_replace(',', '.', $clean); }
+                    } elseif ($has_dot) {
+                        if (substr_count($clean, '.') > 1 || preg_match('/\.\d{3}$/', $clean)) { $clean = str_replace('.', '', $clean); }
+                    } elseif ($has_comma) {
+                        if (substr_count($clean, ',') > 1 || preg_match('/,\d{3}$/', $clean)) { $clean = str_replace(',', '', $clean); }
+                        else { $clean = str_replace(',', '.', $clean); }
+                    }
+                    return floatval($clean);
+                };
+
+                $gp = $parseNum($datas[$i][3]);
+                $tj = $parseNum($datas[$i][4]);
+                $tp = $parseNum($datas[$i][5]);
+                $lm = $parseNum($datas[$i][6]);
+                $bo = $parseNum($datas[$i][7]);
+                $bt = $parseNum($datas[$i][8]);
+                $bk = $parseNum($datas[$i][9]);
+                $pp = $parseNum($datas[$i][10]);
+                $pl = $parseNum($datas[$i][11]);
+                $ket = trim($datas[$i][12] ?? '');
+                
+                // Hitung total terima
+                $total_pendapatan = $gp + $tj + $tp + $lm + $bo;
+                $total_potongan = $bt + $bk + $pp + $pl;
+                $total_terima = $total_pendapatan - $total_potongan;
+                
+                // Cek apakah data sudah ada?
+                $qcek = $conn->prepare("SELECT id FROM tgaji WHERE iduser_pegawai = :idp AND periode = :per");
+                $qcek->execute([':idp' => $idpegawai, ':per' => $periode]);
+                $existing = $qcek->fetch();
+                
+                if ($existing) {
+                    // Jika sudah ada, lakukan UPDATE (Timpa data lama)
+                    $stmt = $conn->prepare("
+                        UPDATE tgaji SET 
+                            gaji_pokok = :gp, tunj_jabatan = :tj, tunj_perjalanan = :tp, 
+                            lembur = :lm, bonus = :bo, bpjs_tk = :bt, bpjs_kesehatan = :bk, 
+                            pot_pinjaman = :pp, pot_lain = :pl, total_terima = :tt, 
+                            keterangan = :ket, tgl_input = NOW(), status_gaji = 'Imported'
+                        WHERE id = :id
+                    ");
+                    $stmt->execute([
+                        ':id' => $existing['id'], ':gp' => $gp, ':tj' => $tj, ':tp' => $tp,
+                        ':lm' => $lm, ':bo' => $bo, ':bt' => $bt, ':bk' => $bk, ':pp' => $pp, ':pl' => $pl,
+                        ':tt' => $total_terima, ':ket' => $ket
+                    ]);
+                } else {
+                    // Jika belum ada, lakukan INSERT (Tambah baru)
+                    $stmt = $conn->prepare("
+                        INSERT INTO tgaji (
+                            iduser_pegawai, periode, gaji_pokok, tunj_jabatan, tunj_perjalanan, 
+                            lembur, bonus, bpjs_tk, bpjs_kesehatan, pot_pinjaman, pot_lain, 
+                            total_terima, keterangan, status_gaji, tgl_input
+                        ) VALUES (
+                            :idp, :per, :gp, :tj, :tp, :lm, :bo, :bt, :bk, :pp, :pl, :tt, :ket, 'Imported', NOW()
+                        )
+                    ");
+                    
+                    $stmt->execute([
+                        ':idp' => $idpegawai, ':per' => $periode, ':gp' => $gp, ':tj' => $tj, ':tp' => $tp,
+                        ':lm' => $lm, ':bo' => $bo, ':bt' => $bt, ':bk' => $bk, ':pp' => $pp, ':pl' => $pl,
+                        ':tt' => $total_terima, ':ket' => $ket
+                    ]);
+                }
+                
+                $succ++;
+            }
+            
+            $pesan = "Proses Selesai! Berhasil memproses $succ data pegawai.";
+            
+        } catch (Exception $e) {
+            $pesan = "Gagal memproses file: " . $e->getMessage();
+        }
+    } else {
+        $pesan = "Silakan pilih file yang valid.";
+    }
+}
+
 // Proses hapus data
 if (isset($_POST['hapus']) && isset($_POST['id_hapus'])) {
     try {
@@ -952,6 +1163,10 @@ if (isset($_POST['periode_generate']) && !empty($_POST['periode_generate'])) {
                     <i class="fa fa-cog"></i> Generate Gaji
                 </button>
                 
+                <button type="button" class="btn btn-info" onclick="document.getElementById('modalImport').style.display='block'">
+                   <i class="fa fa-file-excel-o"></i> Kelola Gaji (Excel)
+                </button>
+
                 <?php if (!empty($periode_terbaru)): ?>
                 <button type="button" class="btn btn-default" onclick="cetakAllZip('<?= htmlspecialchars($periode_terbaru) ?>')" style="font-size:14px; padding:8px 20px;">
                     <i class="fa fa-file-archive-o"></i> Cetak All (ZIP)
@@ -1167,6 +1382,41 @@ if (isset($_POST['periode_generate']) && !empty($_POST['periode_generate'])) {
                 </button>
             </div>
         </form>
+    </div>
+</div>
+
+<!-- Modal Import (Pusat Kontrol Excel) -->
+<div id="modalImport" class="modal">
+    <div class="modal-content" style="max-width: 500px; border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.2);">
+        <span class="close" onclick="document.getElementById('modalImport').style.display='none'" style="font-size: 28px;">&times;</span>
+        <h3 style="color: #2F5597; font-weight: bold;"><i class="fa fa-file-excel-o"></i> Pusat Kontrol Excel</h3>
+        <p class="text-muted">Kelola data gaji masal (Mendukung .xls & .xlsx)</p>
+        <hr style="border-top: 2px solid #eee;">
+        
+        <!-- Langkah 1: Unduh -->
+        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #5bc0de;">
+            <h5 style="margin-top:0; font-weight:bold;">Langkah 1: Ambil Data</h5>
+            <p style="font-size: 13px;">Dapatkan file Excel yang sudah terisi otomatis dengan data pegawai & gaji terakhir.</p>
+            <a href="38_export_template.php" class="btn btn-info btn-block" style="border-radius: 20px;">
+                <i class="fa fa-download"></i> Unduh Data Excel (Otomatis)
+            </a>
+        </div>
+
+        <!-- Langkah 2: Unggah -->
+        <div style="background: #fdfdfe; padding: 15px; border-radius: 8px; border: 1px dashed #28a745;">
+            <h5 style="margin-top:0; font-weight:bold;">Langkah 2: Unggah Perubahan</h5>
+            <p style="font-size: 13px;">Setelah file diedit, simpan dan unggah kembali di sini.</p>
+            <form action="" method="POST" enctype="multipart/form-data">
+                <input type="file" name="file_excel" accept=".xlsx,.xls" required class="form-control" style="margin-bottom: 15px;">
+                <button type="submit" name="proses_import" class="btn btn-success btn-block" style="border-radius: 20px; font-weight: bold;">
+                    <i class="fa fa-upload"></i> Mulai Perbarui Data
+                </button>
+            </form>
+        </div>
+
+        <div style="margin-top: 15px; text-align: center;">
+            <small class="text-muted">* Sistem akan otomatis merapikan tabel & menghitung total gaji.</small>
+        </div>
     </div>
 </div>
 
@@ -1395,7 +1645,7 @@ function cetakSlip(id) {
     if (!iframe) {
         iframe = document.createElement('iframe');
         iframe.id = 'iframeCetakSlip';
-       iframe.style.cssText = 'position:fixed;left:-9999px;top:0;width:600px;height:800px;border:none;';
+        iframe.style.cssText = 'position:fixed;left:-9999px;top:0;width:600px;height:800px;border:none;';
         document.body.appendChild(iframe);
     }
     iframe.src = '38_cetak_slip_gaji.php?id=' + id;
@@ -1408,25 +1658,10 @@ function cetakAllZip(periode) {
     }
     window.open('38_cetak_slip_gaji_all.php?periode=' + encodeURIComponent(periode), '_blank');
 }
-        error: function() {
-            alert('Gagal mengambil data perhitungan THR');
-        }
-    });
-}
+</script>
 
+<script>
 function hitungThrOtomatisAdjust() {
-    // get original iduser
-    var rowData = window._currentRowData || null; // fallback, try to extract id
-    var selectedIdGaji = $('#adjust_id_gaji').val();
-    
-    if(!selectedIdGaji) {
-        alert("Tidak bisa mengambil ID Gaji.");
-        return;
-    }
-    
-    // We need iduser_pegawai. Easiest way is to refetch or store it globally.
-    // In openAdjustModal, we can store global idpegawai.
-    // So let's add `window._currentIdPegawai = data.iduser_pegawai;` to openAdjustModal script
     var idPegawai = window._currentIdPegawai;
     var periode = $('#adjust_periode').val();
     var gp = parseRibuan($('#adjust_gaji_pokok').val());
@@ -1456,17 +1691,9 @@ function hitungThrOtomatisAdjust() {
         }
     });
 }
-</script>
 
-</body>
-</html>
-
-<script>
 $(document).ready(function () {
-
     const tableId = '#daftar-gaji';
-
-    // Cegah DataTable dipanggil lebih dari sekali
     if ($.fn.DataTable.isDataTable(tableId)) {
         $(tableId).DataTable().destroy();
     }
@@ -1490,6 +1717,7 @@ $(document).ready(function () {
             }
         }
     });
-
 });
 </script>
+</body>
+</html>
