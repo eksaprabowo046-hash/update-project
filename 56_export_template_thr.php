@@ -16,10 +16,10 @@ $sheet->setTitle('Data THR ' . $filter_tahun);
 
 // --- PENGATURAN HEADER ---
 $headers = [
-    'ID PEGAWAI', 
+    'ID PEGAWAI',
     'NAMA PEGAWAI',
-    'TAHUN', 
-    'UPAH TERAKHIR (REF)', 
+    'TAHUN',
+    'UPAH TERAKHIR (REF)',
     'MASA KERJA (BLN)',
     'NOMINAL THR',
     'KETERANGAN'
@@ -51,21 +51,25 @@ $sheet->getRowDimension('1')->setRowHeight(30);
 
 // --- PENGISIAN DATA OTOMATIS ---
 // Ambil semua pegawai aktif
+// Perbaikan: Ambil upah dari record GAJI (bukan THR) dan ambil THR yang sudah tersimpan jika ada
 $query = $conn->prepare("
     SELECT ru.iduser, ru.nama, ru.tgl_masuk,
-           (SELECT gaji_pokok + tunj_jabatan FROM tgaji WHERE iduser_pegawai = ru.iduser ORDER BY periode DESC LIMIT 1) as upah_terakhir
+           (SELECT gaji_pokok + tunj_jabatan FROM tgaji WHERE iduser_pegawai = ru.iduser AND status_gaji != 'THR' ORDER BY periode DESC LIMIT 1) as upah_terakhir,
+           (SELECT thr FROM tgaji WHERE iduser_pegawai = ru.iduser AND status_gaji = 'THR' AND SUBSTRING(periode,1,4) = :tahun LIMIT 1) as thr_tersimpan
     FROM ruser ru
     WHERE ru.stsaktif = 1
     ORDER BY ru.nama ASC
 ");
-$query->execute();
+$query->execute([':tahun' => $filter_tahun]);
 
 $row = 2;
 while ($user = $query->fetch(PDO::FETCH_ASSOC)) {
     $idpegawai = $user['iduser'];
-    $upah = floatval($user['upah_terakhir'] ?? 5000000); // Fallback
-    
-    // Hitung Estimasi THR
+    $upah = floatval($user['upah_terakhir'] ?? 0);
+
+    // Jika upah masih 0, biarkan 0 (Hapus fallback 5jt agar sesuai fakta)
+
+    // Hitung Estimasi THR (sebagai pembanding atau jika belum ada data tersimpan)
     $thr_est = 0;
     $total_bulan = 0;
     if (!empty($user['tgl_masuk'])) {
@@ -73,44 +77,50 @@ while ($user = $query->fetch(PDO::FETCH_ASSOC)) {
         $tgl_thr = new DateTime($filter_tahun . '-12-31');
         $diff = $tgl_masuk->diff($tgl_thr);
         $total_bulan = ($diff->y * 12) + $diff->m;
-        
+
         if ($total_bulan >= 12) {
             $thr_est = $upah;
-        } else if ($total_bulan >= 1) {
+        }
+        else if ($total_bulan >= 1) {
             $thr_est = ($total_bulan / 12) * $upah;
         }
     }
+
+    // Prioritaskan data yang sudah tersimpan di database
+    $thr_final = isset($user['thr_tersimpan']) ? floatval($user['thr_tersimpan']) : round($thr_est);
+    $keterangan = isset($user['thr_tersimpan']) ? 'Data tersimpan' : 'Estimasi sistem';
 
     $sheet->setCellValue('A' . $row, $idpegawai);
     $sheet->setCellValue('B' . $row, $user['nama']);
     $sheet->setCellValue('C' . $row, $filter_tahun);
     $sheet->setCellValue('D' . $row, $upah);
     $sheet->setCellValue('E' . $row, $total_bulan);
-    $sheet->setCellValue('F' . $row, round($thr_est));
-    $sheet->setCellValue('G' . $row, 'Estimasi sistem');
-    
+    $sheet->setCellValue('F' . $row, $thr_final);
+    $sheet->setCellValue('G' . $row, $keterangan);
+
     // Zebra Stripe
     if ($row % 2 == 0) {
-        $sheet->getStyle('A'.$row.':G'.$row)->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('E9F5E8');
+        $sheet->getStyle('A' . $row . ':G' . $row)->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('E9F5E8');
     }
-    $sheet->getStyle('A'.$row.':G'.$row)->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
-    
+    $sheet->getStyle('A' . $row . ':G' . $row)->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
+
     $row++;
 }
 
 // Format Angka
-$sheet->getStyle('D2:D' . ($row-1))->getNumberFormat()->setFormatCode('#,##0');
-$sheet->getStyle('F2:F' . ($row-1))->getNumberFormat()->setFormatCode('#,##0');
+$sheet->getStyle('D2:D' . ($row - 1))->getNumberFormat()->setFormatCode('#,##0');
+$sheet->getStyle('F2:F' . ($row - 1))->getNumberFormat()->setFormatCode('#,##0');
 
 // Lebar kolom otomatis
 foreach (range('A', 'G') as $col) {
     $sheet->getColumnDimension($col)->setAutoSize(true);
 }
 
-if (ob_get_length()) ob_end_clean();
+if (ob_get_length())
+    ob_end_clean();
 
 header('Content-Type: application/vnd.ms-excel');
-header('Content-Disposition: attachment;filename="TEMPLATE_THR_'.$filter_tahun.'.xls"');
+header('Content-Disposition: attachment;filename="TEMPLATE_THR_' . $filter_tahun . '.xls"');
 header('Cache-Control: max-age=0');
 
 $writer = new Xls($spreadsheet);
